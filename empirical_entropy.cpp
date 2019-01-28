@@ -5,7 +5,7 @@
 #include <limits>
 #include <cmath>
 #include <numeric>
-#include "/scripts/code/dcheck.hpp"
+#include "dcheck.hpp"
 
 using namespace std;
 
