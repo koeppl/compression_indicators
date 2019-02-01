@@ -26,17 +26,18 @@ double entropy_div(const std::vector<size_t>& counts) {
 	return ret;
 }
 
-double zeroth_entropy(std::istream& is) {
+double zeroth_entropy(std::istream& is, const size_t maxlength) {
 	constexpr size_t counts_length = std::numeric_limits<uint8_t>::max()+1;
 	size_t counts[counts_length];
 	std::fill(counts, counts+counts_length, 0);
 	size_t length = 0;
 	while(!is.eof()) {
 		const uint8_t read_char = is.get();
-		if(is.eof()) break;
+		if(is.eof()) { break; }
 		DCHECK_LT(read_char, counts_length);
 		++counts[ read_char ];
 		++length;
+		if(length == maxlength) { break; }
 	}
 	DCHECK_EQ(std::accumulate(counts,counts+counts_length,0ULL), length);
 	double ret = 0;
@@ -48,8 +49,8 @@ double zeroth_entropy(std::istream& is) {
 	return ret/length;
 }
 
-double kth_entropy(std::istream& is, const size_t num_k) {
-	if(num_k == 0) return zeroth_entropy(is);
+double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength) {
+	if(num_k == 0) return zeroth_entropy(is, maxlength);
 	size_t length = 0;
 	std::string ringbuffer;
 	std::unordered_map<std::string, std::vector<size_t>> dict;
@@ -71,6 +72,7 @@ double kth_entropy(std::istream& is, const size_t num_k) {
 		}
 		++it->second[after_char];
 		ringbuffer.erase(0,1); //remove front
+		if(length == maxlength) { break; }
 	}
 	double ret = 0;
 	for(const auto& element : dict) {
@@ -81,10 +83,11 @@ double kth_entropy(std::istream& is, const size_t num_k) {
 
 
 int main(const int argc, const char *const argv[]) {
-	if(argc != 3) {
-		std::cerr << "Usage: " << argv[0] << " filename k\ncomputes the `k`-th entropy of `filename`." << std::endl;
+	if(argc < 3) {
+		std::cerr << "Usage: " << argv[0] << " filename k [prefix]\ncomputes the `k`-th entropy of `filename`, optionally for the prefix with `prefix` characters." << std::endl;
 		return 1;
 	}
+	const size_t length = argc >= 4 ? strtoul(argv[3], NULL, 10) : 0;
 	const size_t num_k = strtoul(argv[2], NULL, 10);
 
 	{
@@ -107,7 +110,7 @@ int main(const int argc, const char *const argv[]) {
 		std::cerr << "file " << argv[1] << " is not readable." << std::endl;
 		return 1;
 	}
-	std::cout << kth_entropy(file, num_k) << std::endl;
+	std::cout << kth_entropy(file, num_k, length) << std::endl;
 
 	return 0;
 }
