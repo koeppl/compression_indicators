@@ -15,7 +15,7 @@ double double_div(const T& a, const T& b) {
 }
 
 double entropy_div(const std::vector<size_t>& counts) {
-	const size_t length = std::accumulate(counts.begin(), counts.end(), 0);
+	const size_t length = std::accumulate(counts.begin(), counts.end(), 0ULL);
 	DCHECK_EQ(counts.size(), std::numeric_limits<uint8_t>::max()+1);
 	double ret = 0;
 	for(size_t i = 0; i < std::numeric_limits<uint8_t>::max()+1; ++i) {
@@ -49,8 +49,44 @@ double zeroth_entropy(std::istream& is, const size_t maxlength) {
 	return ret/length;
 }
 
+double first_entropy(std::istream& is, const size_t maxlength) {
+	constexpr size_t num_k = 1;
+	size_t length = 0;
+	std::string ringbuffer;
+	std::unordered_map<char, std::vector<size_t>> dict;
+	char oldchar;
+	char newchar;
+	while(!is.eof()) {
+		const uint8_t read_char = is.get();
+		if(is.eof()) break;
+		++length;
+		ringbuffer.push_back(read_char);
+		oldchar = newchar;
+		newchar = read_char;
+		if(ringbuffer.size() < num_k+1) {
+			continue;
+		}
+		DCHECK_EQ(ringbuffer.size(), num_k+1);
+		const std::string key = ringbuffer.substr(0, num_k);
+		auto it = dict.find(oldchar);
+		if(it == dict.end()) {
+			dict[oldchar] = std::vector<size_t>(std::numeric_limits<uint8_t>::max()+1, 0);
+			it = dict.find(oldchar);
+		}
+		++it->second[newchar];
+		ringbuffer.erase(0,1); //remove front
+		if(length == maxlength) { break; }
+	}
+	double ret = 0;
+	for(const auto& element : dict) {
+		ret += entropy_div(element.second);
+	}
+	return ret/length;
+}
+
 double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength) {
 	if(num_k == 0) return zeroth_entropy(is, maxlength);
+	if(num_k == 1) return first_entropy(is, maxlength);
 	size_t length = 0;
 	std::string ringbuffer;
 	std::unordered_map<std::string, std::vector<size_t>> dict;

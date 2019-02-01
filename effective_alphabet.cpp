@@ -14,7 +14,7 @@ double double_div(const T& a, const T& b) {
 }
 
 double entropy_div(const std::vector<size_t>& counts) {
-	const size_t length = std::accumulate(counts.begin(), counts.end(), 0);
+	const size_t length = std::accumulate(counts.begin(), counts.end(), 0ULL);
 	DCHECK_EQ(counts.size(), std::numeric_limits<uint8_t>::max()+1);
 	double ret = 0;
 	for(size_t i = 0; i < std::numeric_limits<uint8_t>::max()+1; ++i) {
