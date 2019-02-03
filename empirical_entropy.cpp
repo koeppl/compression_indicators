@@ -50,31 +50,23 @@ double zeroth_entropy(std::istream& is, const size_t maxlength) {
 }
 
 double first_entropy(std::istream& is, const size_t maxlength) {
-	constexpr size_t num_k = 1;
 	size_t length = 0;
-	std::string ringbuffer;
-	std::unordered_map<char, std::vector<size_t>> dict;
-	char oldchar;
-	char newchar;
+	std::unordered_map<uint8_t, std::vector<size_t>> dict;
+	uint8_t oldchar;
+	uint8_t newchar = is.get();
+	++length;
 	while(!is.eof()) {
-		const uint8_t read_char = is.get();
 		if(is.eof()) break;
 		++length;
-		ringbuffer.push_back(read_char);
 		oldchar = newchar;
-		newchar = read_char;
-		if(ringbuffer.size() < num_k+1) {
-			continue;
-		}
-		DCHECK_EQ(ringbuffer.size(), num_k+1);
-		const std::string key = ringbuffer.substr(0, num_k);
+		newchar = is.get();
 		auto it = dict.find(oldchar);
 		if(it == dict.end()) {
 			dict[oldchar] = std::vector<size_t>(std::numeric_limits<uint8_t>::max()+1, 0);
 			it = dict.find(oldchar);
 		}
+		DCHECK(it != dict.end());
 		++it->second[newchar];
-		ringbuffer.erase(0,1); //remove front
 		if(length == maxlength) { break; }
 	}
 	double ret = 0;
