@@ -6,6 +6,8 @@
 #include <cmath>
 #include <numeric>
 #include "dcheck.hpp"
+#include "separate_chaining_table.hpp"
+#include "chaining_bucket.hpp"
 
 using namespace std;
 
@@ -21,6 +23,20 @@ double entropy_div(const std::vector<size_t>& counts) {
 	for(size_t i = 0; i < std::numeric_limits<uint8_t>::max()+1; ++i) {
 		if(counts[i] == 0) continue;
 		ret += counts[i] * std::log2(double_div(length, counts[i]));
+	}
+
+	return ret;
+}
+
+template<class T>
+double entropy_div_map(const T& counts) {
+	const size_t length = std::accumulate(counts.begin(), counts.end(), 0ULL, [] (const auto& a, const auto& b) { return a + b.second; });
+	DCHECK_LE(counts.size(), std::numeric_limits<uint8_t>::max()+1);
+	double ret = 0;
+
+	for(const auto& count : counts) {
+		if(count.second == 0) continue;
+		ret += count.second * std::log2(double_div(length, count.second));
 	}
 
 	return ret;
@@ -76,7 +92,7 @@ double first_entropy(std::istream& is, const size_t maxlength) {
 	return ret/length;
 }
 
-double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength) {
+double kth_entropy_naive(std::istream& is, const size_t num_k, const size_t maxlength) {
 	if(num_k == 0) return zeroth_entropy(is, maxlength);
 	if(num_k == 1) return first_entropy(is, maxlength);
 	size_t length = 0;
@@ -109,6 +125,47 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 	return ret/length;
 }
 
+double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength) {
+	using namespace separate_chaining;
+
+	if(num_k == 0) return zeroth_entropy(is, maxlength);
+	if(num_k == 1) return first_entropy(is, maxlength);
+	size_t length = 0;
+	size_t buffer = 0;
+	using bucket_type = chaining_bucket<plain_key_bucket<uint8_t>, plain_key_bucket<size_t>, incremental_resize>;
+	// using bucket_type_vector = std::vector<size_t>;
+
+	separate_chaining_map<avx2_key_bucket<size_t>, class_key_bucket<bucket_type>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict;
+	// separate_chaining_map<avx2_key_bucket<size_t>, class_key_bucket<bucket_type_vector>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict_vector;
+	// std::unordered_map<size_t, std::vector<size_t>> dict;
+	while(!is.eof()) {
+		const size_t key = buffer & (-1ULL >> (64- 8*num_k));
+		const uint8_t read_char = is.get();
+		if(is.eof()) break;
+		++length;
+		buffer <<= 8;
+		buffer |= read_char;
+		if(length < num_k+1) {
+			continue;
+		}
+		// if(dict_vector.find(key) == dict_vector.end()) {
+		// 	dict_vector[key] =  std::vector<size_t>(std::numeric_limits<uint8_t>::max()+1, 0);
+		// }
+		auto& bucket = dict[key];
+		if(bucket.find(read_char) == bucket.end()) { //TODO: want find_or_insert like in cht
+			bucket[read_char] = 0;
+		}
+		DCHECK_EQ(dict[key][read_char], dict_vector[key][read_char]);
+		++bucket[read_char];
+		if(length == maxlength) { break; }
+	}
+	double ret = 0;
+	for(auto it = dict.begin_nav(); it != dict.end_nav(); ++it) {
+		ret += entropy_div_map(it.value());
+	}
+	return ret/length;
+}
+
 
 int main(const int argc, const char *const argv[]) {
 	if(argc < 3) {
@@ -133,12 +190,23 @@ int main(const int argc, const char *const argv[]) {
 	}
 
 
-	ifstream file(argv[1]);
-	if(!file.good()) {
-		std::cerr << "file " << argv[1] << " is not readable." << std::endl;
-		return 1;
+	{
+		ifstream file(argv[1]);
+		if(!file.good()) {
+			std::cerr << "file " << argv[1] << " is not readable." << std::endl;
+			return 1;
+		}
+		std::cout << kth_entropy(file, num_k, length) << std::endl;
 	}
-	std::cout << kth_entropy(file, num_k, length) << std::endl;
+	// {
+	// 	ifstream file(argv[1]);
+	// 	if(!file.good()) {
+	// 		std::cerr << "file " << argv[1] << " is not readable." << std::endl;
+	// 		return 1;
+	// 	}
+	// 	std::cout << kth_entropy_naive(file, num_k, length) << std::endl;
+	// }
+
 
 	return 0;
 }
