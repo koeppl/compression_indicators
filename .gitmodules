@@ -1,3 +1,6 @@
 [submodule "external/separate_chaining"]
 	path = external/separate_chaining
 	url = https://github.com/koeppl/separate_chaining
+[submodule "external/bit_span"]
+	path = external/bit_span
+	url = https://github.com/tudocomp/bit_span.git
