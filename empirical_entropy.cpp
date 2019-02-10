@@ -13,6 +13,33 @@
 
 using namespace std;
 
+
+bool kVerbose = false;
+
+inline void display_read_process(const size_t length, const size_t maxlength) {
+    if(kVerbose && maxlength != 0 && (length-1)*100/maxlength < (length)*100/maxlength) { 
+	std::cout << ((length)*100/maxlength) << "% of text read..." << std::endl; 
+    }
+}
+template<class T>
+inline void display_read_kmers(const size_t counter, const T& map) {
+    if(kVerbose) {
+	const size_t mapsize = map.size();
+	if((counter-1)*100/mapsize < (counter)*100/mapsize) { 
+	    std::cout << ((counter)*100/mapsize) << "% of k-mers processed..." << std::endl; 
+	}
+    }
+}
+template<class T>
+inline void display_remain_kmers(const size_t counter, const T& map) {
+    if(kVerbose) {
+	const size_t mapsize = map.size()+counter;
+	if((counter-1)*100/mapsize < (counter)*100/mapsize) { 
+	    std::cout << ((counter)*100/mapsize) << "% of k-mers processed..." << std::endl; 
+	}
+    }
+}
+
 template<class T>
 double double_div(const T& a, const T& b) {
 	return static_cast<double>(a)/static_cast<double>(b);
@@ -55,6 +82,7 @@ double zeroth_entropy(std::istream& is, const size_t maxlength) {
 		DCHECK_LT(read_char, counts_length);
 		++counts[ read_char ];
 		++length;
+		display_read_process(length, maxlength);
 		if(length == maxlength) { break; }
 	}
 	DCHECK_EQ(std::accumulate(counts,counts+counts_length,0ULL), length);
@@ -67,36 +95,9 @@ double zeroth_entropy(std::istream& is, const size_t maxlength) {
 	return ret/length;
 }
 
-double first_entropy(std::istream& is, const size_t maxlength) {
-	size_t length = 0;
-	std::unordered_map<uint8_t, std::vector<size_t>> dict;
-	uint8_t oldchar;
-	uint8_t newchar = is.get();
-	++length;
-	while(!is.eof()) {
-		if(is.eof()) break;
-		++length;
-		oldchar = newchar;
-		newchar = is.get();
-		auto it = dict.find(oldchar);
-		if(it == dict.end()) {
-			dict[oldchar] = std::vector<size_t>(std::numeric_limits<uint8_t>::max()+1, 0);
-			it = dict.find(oldchar);
-		}
-		DCHECK(it != dict.end());
-		++it->second[newchar];
-		if(length == maxlength) { break; }
-	}
-	double ret = 0;
-	for(const auto& element : dict) {
-		ret += entropy_div(element.second);
-	}
-	return ret/length;
-}
 
 double kth_entropy_naive(std::istream& is, const size_t num_k, const size_t maxlength) {
 	if(num_k == 0) return zeroth_entropy(is, maxlength);
-	if(num_k == 1) return first_entropy(is, maxlength);
 	size_t length = 0;
 	std::string ringbuffer;
 	std::unordered_map<std::string, std::vector<size_t>> dict;
@@ -104,6 +105,7 @@ double kth_entropy_naive(std::istream& is, const size_t num_k, const size_t maxl
 		const uint8_t read_char = is.get();
 		if(is.eof()) break;
 		++length;
+		display_read_process(length, maxlength);
 		ringbuffer.push_back(read_char);
 		if(ringbuffer.size() < num_k+1) {
 			continue;
@@ -121,8 +123,12 @@ double kth_entropy_naive(std::istream& is, const size_t num_k, const size_t maxl
 		if(length == maxlength) { break; }
 	}
 	double ret = 0;
+	size_t stat_counter = 0;
 	for(const auto& element : dict) {
 		ret += entropy_div(element.second);
+		++stat_counter;
+		display_read_kmers(stat_counter, dict);
+
 	}
 	return ret/length;
 }
@@ -131,7 +137,6 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 	using namespace separate_chaining;
 
 	if(num_k == 0) return zeroth_entropy(is, maxlength);
-	// if(num_k == 1) return first_entropy(is, maxlength);
 	size_t length = 0;
 	uint64_t buffer = 0;
 	using bucket_type = chaining_bucket<avx2_key_bucket<uint8_t>, plain_key_bucket<tdc::uint_t<40>>, incremental_resize>;
@@ -148,6 +153,7 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 		const uint8_t read_char = is.get();
 		if(is.eof()) break;
 		++length;
+		display_read_process(length, maxlength);
 		buffer <<= 8;
 		buffer |= read_char;
 		if(length < num_k+1) {
@@ -173,6 +179,7 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 		ret2 += entropy_div(element.second);
 	}
 #endif
+	size_t stat_counter = 0;
 	double ret = 0;
 	for(auto it = dict.begin_nav(); it != dict.end_nav(); ++it) {
 #ifndef NDEBUG
@@ -187,6 +194,8 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 	    DCHECK_GT(ret0+0.002, entropy_div(vec)-0.002);
 
 	    ret += ret0;
+	    ++stat_counter;
+	    display_read_kmers(stat_counter, dict);
 	}
 	DCHECK_LT(ret-0.002, ret2+0.002);
 	DCHECK_GT(ret+0.002, ret2-0.002);
@@ -198,7 +207,6 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 	using namespace separate_chaining;
 
 	if(num_k == 0) return zeroth_entropy(is, maxlength);
-	// if(num_k == 1) return first_entropy(is, maxlength);
 	size_t length = 0;
 	size_t buffer = 0;
 
@@ -209,6 +217,7 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 		const uint8_t read_char = is.get();
 		if(is.eof()) break;
 		++length;
+		display_read_process(length, maxlength);
 		buffer <<= 8;
 		buffer |= read_char;
 		if(length < num_k+1) {
@@ -222,10 +231,11 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 	}
 
 	double ret = 0;
+	size_t stat_counter = 0;
 
 	std::vector<size_t> counts(std::numeric_limits<uint8_t>::max()+1, 0);
+	auto itbegin = dict.cbegin_nav();
 	while(!dict.empty()) {
-		const auto itbegin = dict.cbegin();
 		DCHECK_EQ(itbegin.key(), itbegin.key() &  (-1ULL >> (64- 8*(num_k+1))));
 		const size_t kmer_base = itbegin.key() & (-1ULL << 8);
 
@@ -236,61 +246,95 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 			if(it == dict.cend()) { continue; }
 			counts[c] = it.value();
 			dict.erase(kmer_key);
+			++stat_counter;
+			display_remain_kmers(stat_counter, dict);
 		}
 		ret += entropy_div(counts);
+		if(dict.bucket_size(itbegin.bucket()) == 0) ++itbegin;
 	}
 		return ret/length;
 }
 
 
-int main(const int argc, const char *const argv[]) {
-	if(argc < 3) {
-		std::cerr << "Usage: " << argv[0] << " filename k [prefix]\ncomputes the `k`-th entropy of `filename`, optionally for the prefix with `prefix` characters." << std::endl;
-		return 1;
-	}
-	const size_t length = argc >= 4 ? strtoul(argv[3], NULL, 10) : 0;
-	const size_t num_k = strtoul(argv[2], NULL, 10);
+#include <unistd.h>
+#include <filesystem>
 
-	// {
-	// 	const double required = std::pow(static_cast<double>(std::numeric_limits<uint8_t>::max()+1), num_k);
-	// 	if(required > static_cast<double>(std::numeric_limits<size_t>::max())) {
-	// 		std::cerr << "Chosen k = " << num_k << " too large!" << std::endl;
-	// 		return 1;
-	// 	}
-	// 	void* mem = malloc(required);
-	// 	if(mem == nullptr) {
-	// 		std::cerr << "no memory available to compute " << num_k << "-th entropy!" << std::endl;
-	// 		return 1;
-	// 	}
-	// 	free(mem);
-	// }
-    //
 
-	{
-		ifstream file(argv[1]);
-		if(!file.good()) {
-			std::cerr << "file " << argv[1] << " is not readable." << std::endl;
-			return 1;
-		}
-		std::cout << kth_entropy(file, num_k, length) << std::endl;
-	}
-	{
-		ifstream file(argv[1]);
-		if(!file.good()) {
-			std::cerr << "file " << argv[1] << " is not readable." << std::endl;
-			return 1;
-		}
-		std::cout << kth_entropy_compact(file, num_k, length) << std::endl;
-	}
-	{
-		ifstream file(argv[1]);
-		if(!file.good()) {
-			std::cerr << "file " << argv[1] << " is not readable." << std::endl;
-			return 1;
-		}
-		std::cout << kth_entropy_naive(file, num_k, length) << std::endl;
-	}
+void printUsage(char** argv) {
+    std::cerr << "Usage: " << argv[0] << " -f filename -k k [-p prefix] [-v] [-m method]\ncomputes the `k`-th entropy of `filename`, optionally for the prefix with `prefix` characters with method m = {0,1,2}, optionally verbose (-v)." << std::endl;
+}
 
+int main(const int argc, char** argv) {
+
+    size_t num_k = 0;
+    size_t method = 0;
+    size_t prefixlength = 0;
+    std::string filename;
+    int c;
+    while((c = getopt (argc, argv, "k:vm:p:f:")) != -1) {
+	switch(c) {
+	    case 'k':
+		num_k = strtoul(optarg, NULL, 10);
+		break;
+	    case 'v':
+		kVerbose = 1;
+		break;
+	    case 'm':
+		method = strtoul(optarg, NULL, 10);
+		break;
+	    case 'p':
+		prefixlength = strtoul(optarg, NULL, 10);
+		break;
+	    case 'f':
+		filename = optarg;
+		break;
+	    default:
+		printUsage(argv);
+		abort();
+		break;
+	}
+    }
+    if(kVerbose) {
+	std::cout << "Parameters: \n - filname = " << filename << "\n - k = " << num_k << "\n - prefix = " << "\n - method = " << method << std::endl;
+    }
+
+    if(filename.empty()) {
+	printUsage(argv);
+	return 1;
+    }
+    if(prefixlength == 0) {
+	try {
+	    prefixlength = std::filesystem::file_size(filename); 
+	} catch(std::filesystem::filesystem_error& e) {
+	    std::cerr << "file " << filename << " is not readable." << std::endl;
+	    std::cerr << e.what() << std::endl;
+	    return 1;
+	}
+    }
+
+	ifstream file(filename);
+	if(!file.good()) {
+	    std::cerr << "file " << filename << " is not readable." << std::endl;
+	    return 1;
+	}
+	double entropy;
+	switch(method) {
+	    case 1:
+		if(kVerbose) { std::cout << "Running kth_entropy_compact..." << std::endl; }
+		entropy = kth_entropy_compact(file, num_k, prefixlength);
+		break;
+	    case 2:
+		if(kVerbose) { std::cout << "Running kth_entropy_naive..." << std::endl; }
+		entropy = kth_entropy_naive(file, num_k, prefixlength);
+		break;
+	    default:
+		if(kVerbose) { std::cout << "Running kth_entropy..." << std::endl; }
+		entropy = kth_entropy(file, num_k, prefixlength);
+		break;
+
+	}
+	if(kVerbose) { std::cout << num_k << "-th empirical entropy of file " << filename << " is "; }
+	std::cout << entropy << std::endl;
 
 	return 0;
 }

@@ -20,6 +20,7 @@ include_directories(external/bit_span/include)
 
 add_executable (effective_alphabet effective_alphabet.cpp)
 add_executable (empirical_entropy empirical_entropy.cpp)
+target_link_libraries(empirical_entropy stdc++fs)
 
 
 MESSAGE( STATUS "Built Type: " ${CMAKE_BUILD_TYPE} )
