@@ -257,7 +257,17 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 
 
 #include <unistd.h>
+
+
+#if __GNUC__ <= 7
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#else
 #include <filesystem>
+namespace fs = std::filesystem;
+#endif//__GNUC__
+
+
 
 
 void printUsage(char** argv) {
@@ -304,8 +314,8 @@ int main(const int argc, char** argv) {
     }
     if(prefixlength == 0) {
 	try {
-	    prefixlength = std::filesystem::file_size(filename); 
-	} catch(std::filesystem::filesystem_error& e) {
+	    prefixlength = fs::file_size(filename); 
+	} catch(fs::filesystem_error& e) {
 	    std::cerr << "file " << filename << " is not readable." << std::endl;
 	    std::cerr << e.what() << std::endl;
 	    return 1;
