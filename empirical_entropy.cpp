@@ -141,7 +141,7 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 	uint64_t buffer = 0;
 	using bucket_type = chaining_bucket<avx2_key_bucket<uint8_t>, plain_key_bucket<tdc::uint_t<40>>, incremental_resize>;
 
-	separate_chaining_map<varwidth_key_bucket, class_key_bucket<bucket_type>, xorshift_hash, incremental_resize> dict(63);
+	separate_chaining_map<varwidth_key_bucket, class_key_bucket<bucket_type>, xorshift_hash, incremental_resize> dict(64);
 	//separate_chaining_map<avx2_key_bucket<size_t>, class_key_bucket<bucket_type>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict;
 
 #ifndef NDEBUG
@@ -210,7 +210,8 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 	size_t length = 0;
 	size_t buffer = 0;
 
-	separate_chaining_map<avx2_key_bucket<size_t>, plain_key_bucket<tdc::uint_t<40>>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict;
+	//separate_chaining_map<avx2_key_bucket<size_t>, plain_key_bucket<tdc::uint_t<40>>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict;
+	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict(64);
 
 
 	while(!is.eof()) {
