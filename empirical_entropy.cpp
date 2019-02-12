@@ -492,6 +492,7 @@ double kth_entropy_fastswitch(std::istream& is, const size_t num_k, const size_t
 
 }
 
+template<class bucket_type>
 double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t maxlength) {
 	using namespace separate_chaining;
 
@@ -499,10 +500,10 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 	size_t length = 0;
 	size_t buffer = 0;
 
-	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict((num_k+1)*8);
+	separate_chaining_map<bucket_type, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict((num_k+1)*8);
 
 	//separate_chaining_map<avx2_key_bucket<uint64_t>, plain_key_bucket<uint64_t>, xorshift_hash, incremental_resize> dict((num_k+1)*8);
-	separate_chaining_map<avx2_key_bucket<uint64_t>, plain_key_bucket<uint64_t>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict(64);
+	//separate_chaining_map<avx2_key_bucket<uint64_t>, plain_key_bucket<uint64_t>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict(64);
 
 	while(!is.eof()) {
 		const uint8_t read_char = is.get();
@@ -617,10 +618,18 @@ int main(const int argc, char** argv) {
 		    std::cerr << "Method works only up to k = 8" << std::endl;
 		    return 1;
 		}
-		if(kVerbose) { std::cout << "Running kth_entropy_compact..." << std::endl; }
-		entropy = kth_entropy_compact(file, num_k, prefixlength);
+		if(kVerbose) { std::cout << "Running kth_entropy_compact<var>..." << std::endl; }
+		entropy = kth_entropy_compact<varwidth_key_bucket>(file, num_k, prefixlength);
 		break;
 	    case 3:
+		if(num_k > 8) {
+		    std::cerr << "Method works only up to k = 8" << std::endl;
+		    return 1;
+		}
+		if(kVerbose) { std::cout << "Running kth_entropy_compact<avx2>..." << std::endl; }
+		entropy = kth_entropy_compact<avx2_key_bucket<uint64_t>>(file, num_k, prefixlength);
+		break;
+	    case 4:
 		if(num_k > 7) {
 		    std::cerr << "Method works only up to k = 7" << std::endl;
 		    return 1;
@@ -628,7 +637,7 @@ int main(const int argc, char** argv) {
 		if(kVerbose) { std::cout << "Running kth_entropy_switch..." << std::endl; }
 		entropy = kth_entropy_switch(file, num_k, prefixlength);
 		break;
-	    case 4:
+	    case 5:
 		if(num_k > 7) {
 		    std::cerr << "Method works only up to k = 7" << std::endl;
 		    return 1;
