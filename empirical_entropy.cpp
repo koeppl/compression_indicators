@@ -141,7 +141,7 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 	uint64_t buffer = 0;
 	using bucket_type = chaining_bucket<avx2_key_bucket<uint8_t>, plain_key_bucket<tdc::uint_t<40>>, incremental_resize>;
 
-	separate_chaining_map<varwidth_key_bucket, class_key_bucket<bucket_type>, xorshift_hash, incremental_resize> dict(64);
+	separate_chaining_map<varwidth_key_bucket, class_key_bucket<bucket_type>, xorshift_hash, incremental_resize> dict(num_k*8);
 	//separate_chaining_map<avx2_key_bucket<size_t>, class_key_bucket<bucket_type>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict;
 
 #ifndef NDEBUG
@@ -203,6 +203,29 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 	return ret/length;
 }
 
+// template<class T>
+// void kth_entropy_compact(std::istream& is, const size_t num_k, const size_t maxlength, T& dict, size_t& length, size_t& buffer) {
+// 	while(!is.eof()) {
+// 		const uint8_t read_char = is.get();
+// 		if(is.eof()) break;
+// 		++length;
+// 		display_read_process(length, maxlength);
+// 		buffer <<= 8;
+// 		buffer |= read_char;
+// 		const size_t composedkey = buffer & (-1ULL >> (64- 8*(num_k+1)));
+//
+// 		if( ++dict.find_or_insert(composedkey, 0).value_ref() == std::numeric_limits<typename T::value_type>::max() ) {
+// 		    return;
+// 		}
+// 		
+// 		if(length == maxlength) { break; }
+// 	}
+// }
+// template<class A, class B>
+// void copy_dict(const A& dictA, B& dictB) {
+//
+// }
+
 double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t maxlength) {
 	using namespace separate_chaining;
 
@@ -211,8 +234,23 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 	size_t buffer = 0;
 
 	//separate_chaining_map<avx2_key_bucket<size_t>, plain_key_bucket<tdc::uint_t<40>>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict;
-	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict(64);
+	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint8_t>, xorshift_hash, incremental_resize> dict8(64);
+	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint16_t>, xorshift_hash, incremental_resize> dict16(64);
+	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<24>>, xorshift_hash, incremental_resize> dict24(64);
+	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint32_t>, xorshift_hash, incremental_resize> dict32(64);
+	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict((num_k+1)*8);
 
+
+	while(!is.eof()) {
+		const uint8_t read_char = is.get();
+		if(is.eof()) return 0;
+		++length;
+		buffer <<= 8;
+		buffer |= read_char;
+		if(length == num_k) {
+		    break;
+		}
+	}
 
 	while(!is.eof()) {
 		const uint8_t read_char = is.get();
@@ -221,11 +259,7 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 		display_read_process(length, maxlength);
 		buffer <<= 8;
 		buffer |= read_char;
-		if(length < num_k+1) {
-			continue;
-		}
 		const size_t composedkey = buffer & (-1ULL >> (64- 8*(num_k+1)));
-
 
 		++dict.find_or_insert(composedkey, 0).value_ref();
 		if(length == maxlength) { break; }
@@ -235,7 +269,7 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 	size_t stat_counter = 0;
 
 	std::vector<size_t> counts(std::numeric_limits<uint8_t>::max()+1, 0);
-	auto itbegin = dict.cbegin_nav();
+	auto itbegin = dict.rbegin_nav();
 	while(!dict.empty()) {
 		DCHECK_EQ(itbegin.key(), itbegin.key() &  (-1ULL >> (64- 8*(num_k+1))));
 		const size_t kmer_base = itbegin.key() & (-1ULL << 8);
@@ -251,7 +285,10 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 			display_remain_kmers(stat_counter, dict);
 		}
 		ret += entropy_div(counts);
-		if(dict.bucket_size(itbegin.bucket()) == 0) ++itbegin;
+		if(dict.bucket_size(itbegin.bucket()) == 0) {
+		    dict.shrink_to_fit(itbegin.bucket());
+		}
+		--itbegin;
 	}
 		return ret/length;
 }
@@ -331,6 +368,10 @@ int main(const int argc, char** argv) {
 	double entropy;
 	switch(method) {
 	    case 1:
+		if(num_k > 8) {
+		    std::cerr << "Method works only up to k = 8" << std::endl;
+		    return 1;
+		}
 		if(kVerbose) { std::cout << "Running kth_entropy_compact..." << std::endl; }
 		entropy = kth_entropy_compact(file, num_k, prefixlength);
 		break;
@@ -339,6 +380,10 @@ int main(const int argc, char** argv) {
 		entropy = kth_entropy_naive(file, num_k, prefixlength);
 		break;
 	    default:
+		if(num_k > 7) {
+		    std::cerr << "Method works only up to k = 7" << std::endl;
+		    return 1;
+		}
 		if(kVerbose) { std::cout << "Running kth_entropy..." << std::endl; }
 		entropy = kth_entropy(file, num_k, prefixlength);
 		break;
