@@ -203,68 +203,41 @@ double kth_entropy(std::istream& is, const size_t num_k, const size_t maxlength)
 	return ret/length;
 }
 
-// template<class T>
-// void kth_entropy_compact(std::istream& is, const size_t num_k, const size_t maxlength, T& dict, size_t& length, size_t& buffer) {
-// 	while(!is.eof()) {
-// 		const uint8_t read_char = is.get();
-// 		if(is.eof()) break;
-// 		++length;
-// 		display_read_process(length, maxlength);
-// 		buffer <<= 8;
-// 		buffer |= read_char;
-// 		const size_t composedkey = buffer & (-1ULL >> (64- 8*(num_k+1)));
-//
-// 		if( ++dict.find_or_insert(composedkey, 0).value_ref() == std::numeric_limits<typename T::value_type>::max() ) {
-// 		    return;
-// 		}
-// 		
-// 		if(length == maxlength) { break; }
-// 	}
-// }
-// template<class A, class B>
-// void copy_dict(const A& dictA, B& dictB) {
-//
-// }
+template<class T>
+void read_dict(std::istream& is, const size_t num_k, const size_t maxlength, T& dict, size_t& length, size_t& buffer) {
+    while(!is.eof()) {
+	const uint8_t read_char = is.get();
+	if(is.eof()) break;
+	++length;
+	display_read_process(length, maxlength);
+	buffer <<= 8;
+	buffer |= read_char;
+	const size_t composedkey = buffer & (-1ULL >> (64- 8*(num_k+1)));
 
-double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t maxlength) {
-	using namespace separate_chaining;
-
-	if(num_k == 0) return zeroth_entropy(is, maxlength);
-	size_t length = 0;
-	size_t buffer = 0;
-
-	//separate_chaining_map<avx2_key_bucket<size_t>, plain_key_bucket<tdc::uint_t<40>>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict;
-	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint8_t>, xorshift_hash, incremental_resize> dict8(64);
-	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint16_t>, xorshift_hash, incremental_resize> dict16(64);
-	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<24>>, xorshift_hash, incremental_resize> dict24(64);
-	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint32_t>, xorshift_hash, incremental_resize> dict32(64);
-	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict((num_k+1)*8);
-
-
-	while(!is.eof()) {
-		const uint8_t read_char = is.get();
-		if(is.eof()) return 0;
-		++length;
-		buffer <<= 8;
-		buffer |= read_char;
-		if(length == num_k) {
-		    break;
-		}
+	if(++dict.find_or_insert(composedkey, 0).value_ref() == std::numeric_limits<typename T::value_type>::max() ) {
+	    return;
 	}
 
-	while(!is.eof()) {
-		const uint8_t read_char = is.get();
-		if(is.eof()) break;
-		++length;
-		display_read_process(length, maxlength);
-		buffer <<= 8;
-		buffer |= read_char;
-		const size_t composedkey = buffer & (-1ULL >> (64- 8*(num_k+1)));
+	if(length == maxlength) { return; }
+    }
+}
 
-		++dict.find_or_insert(composedkey, 0).value_ref();
-		if(length == maxlength) { break; }
+template<class A, class B>
+void move_dict(A& dictA, B& dictB) {
+    dictB.reserve(dictA.bucket_count());
+    for(auto it = dictA.rbegin_nav(); it != dictA.rend_nav(); --it) {
+	dictB[it.key()] = static_cast<size_t>(it.value());
+	dictA.erase(it);
+	if(it.position() == 0) {
+	    dictA.shrink_to_fit(it.bucket());
 	}
+    }
+}
 
+template<class dict_t>
+double compute_entropy(dict_t& dict, const size_t num_k, const size_t length) {
+
+	if(dict.empty()) return 0;
 	double ret = 0;
 	size_t stat_counter = 0;
 
@@ -280,7 +253,8 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 			auto it = dict.find(kmer_key);
 			if(it == dict.cend()) { continue; }
 			counts[c] = it.value();
-			dict.erase(kmer_key);
+			dict.erase(it);
+			//dict.erase(kmer_key);
 			++stat_counter;
 			display_remain_kmers(stat_counter, dict);
 		}
@@ -290,8 +264,275 @@ double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t ma
 		}
 		--itbegin;
 	}
-		return ret/length;
+	return ret/length;
 }
+
+
+double kth_entropy_switch(std::istream& is, const size_t num_k, const size_t maxlength) {
+	using namespace separate_chaining;
+
+	if(num_k == 0) return zeroth_entropy(is, maxlength);
+	size_t length = 0;
+	size_t buffer = 0;
+
+	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint8_t>, xorshift_hash, incremental_resize> dict8((num_k+1)*8);
+
+	while(!is.eof()) {
+		const uint8_t read_char = is.get();
+		if(is.eof()) return 0;
+		++length;
+		buffer <<= 8;
+		buffer |= read_char;
+		if(length == num_k) {
+		    break;
+		}
+		if(length == maxlength) { return 0; }
+	}
+
+	read_dict(is, num_k, maxlength, dict8, length, buffer);
+	if(length == maxlength || is.eof()) { return compute_entropy(dict8, num_k, length); }
+
+	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint16_t>, xorshift_hash, incremental_resize> dict16((num_k+1)*8);
+	if(kVerbose) {
+	    std::cout << "Copy to dictionary with 16-bit values..."  << std::endl; 
+	}
+	move_dict(dict8, dict16);
+	read_dict(is, num_k, maxlength, dict16, length, buffer);
+	if(length == maxlength  || is.eof()) { return compute_entropy(dict16, num_k, length); }
+
+	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<24>>, xorshift_hash, incremental_resize> dict24((num_k+1)*8);
+	if(kVerbose) {
+	    std::cout << "Copy to dictionary with 24-bit values..."  << std::endl; 
+	}
+	move_dict(dict16, dict24);
+	read_dict(is, num_k, maxlength, dict24, length, buffer);
+	if(length == maxlength  || is.eof()) { return compute_entropy(dict24, num_k, length); }
+
+	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<uint32_t>, xorshift_hash, incremental_resize> dict32((num_k+1)*8);
+	if(kVerbose) {
+	    std::cout << "Copy to dictionary with 32-bit values..."  << std::endl; 
+	}
+	move_dict(dict24, dict32);
+	read_dict(is, num_k, maxlength, dict32, length, buffer);
+	if(length == maxlength  || is.eof()) { return compute_entropy(dict32, num_k, length); }
+
+	separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict40((num_k+1)*8);
+	if(kVerbose) {
+	    std::cout << "Copy to dictionary with 40-bit values..."  << std::endl; 
+	}
+	move_dict(dict32, dict40);
+	read_dict(is, num_k, maxlength, dict40, length, buffer);
+	DCHECK(length == maxlength  || is.eof());
+	return compute_entropy(dict40, num_k, length);
+}
+
+template<class key_width> class nextkeywidth { };
+
+template<> struct nextkeywidth<uint64_t> { using key_type = uint32_t; };
+template<> struct nextkeywidth<uint32_t> { using key_type = uint16_t; };
+template<> struct nextkeywidth<uint16_t> { using key_type = uint8_t; };
+template<> struct nextkeywidth<uint8_t> { using key_type = uint8_t; }; // cannot recurse further
+
+template<class dict_t>
+bool next_keywidth_available(const size_t num_k, const dict_t& dict) {
+	if(sizeof(typename dict_t::key_type) == 8 && ((num_k+1)*8) <= dict.bucket_count_log2() + 32) { return true; }
+	if(sizeof(typename dict_t::key_type) == 4 && ((num_k+1)*8) <= dict.bucket_count_log2() + 32 - 16) { return true; }
+	if(sizeof(typename dict_t::key_type) == 2 && ((num_k+1)*8) <= dict.bucket_count_log2() + 32 - 16 -  8) { return true; }
+	return false;
+}
+
+template<class T>
+void read_dictfast(std::istream& is, const size_t num_k, const size_t maxlength, T& dict, size_t& length, size_t& buffer) {
+    while(!is.eof()) {
+	const uint8_t read_char = is.get();
+	if(is.eof()) break;
+	++length;
+	display_read_process(length, maxlength);
+	buffer <<= 8;
+	buffer |= read_char;
+	const size_t composedkey = buffer & (-1ULL >> (64- 8*(num_k+1)));
+
+	if(++dict.find_or_insert(composedkey, 0).value_ref() == std::numeric_limits<typename T::value_type>::max() ) { return; }
+	if(next_keywidth_available(num_k, dict)) { return; }
+
+	if(length == maxlength) { return; }
+    }
+}
+
+
+
+using namespace separate_chaining;
+template<class key_type, class value_type> 
+using map_type = separate_chaining::separate_chaining_map<avx2_key_bucket<key_type>, plain_key_bucket<value_type>, xorshift_hash, incremental_resize>;
+
+template<class T>
+double kth_entropy_fastswitch(std::istream& is, const size_t num_k, const size_t maxlength, T& dict, size_t& length, size_t& buffer) {
+	using key_type = typename T::key_type;
+
+	read_dictfast(is, num_k, maxlength, dict, length, buffer);
+	if(length == maxlength || is.eof()) { return compute_entropy(dict, num_k, length); }
+	if(next_keywidth_available(num_k, dict)) {
+	    if(kVerbose) {
+		std::cout << "Copy to dictionary with " << (sizeof(typename nextkeywidth<key_type>::key_type)*8) << " bit keys..."  << std::endl; 
+	    }
+	    map_type<typename nextkeywidth<key_type>::key_type, typename std::remove_reference<decltype(dict)>::type::value_type> newdict((num_k+1)*8);
+	    move_dict(dict, newdict);
+	    return kth_entropy_fastswitch(is, num_k, maxlength, newdict, length, buffer);
+	}
+
+
+	map_type<key_type, uint16_t> dict16((num_k+1)*8);
+	if(sizeof(typename T::value_type) < 2) {
+	    if(kVerbose) {
+		std::cout << "Copy to dictionary with 16-bit values..."  << std::endl; 
+	    }
+	    move_dict(dict, dict16);
+	    read_dict(is, num_k, maxlength, dict16, length, buffer);
+	    if(length == maxlength  || is.eof()) { return compute_entropy(dict16, num_k, length); }
+	    if(next_keywidth_available(num_k, dict)) {
+		if(kVerbose) {
+		    std::cout << "Copy to dictionary with " << (sizeof(typename nextkeywidth<key_type>::key_type)*8) << " bit keys..."  << std::endl; 
+		}
+		map_type<typename nextkeywidth<key_type>::key_type, typename decltype(dict16)::value_type> newdict((num_k+1)*8);
+		move_dict(dict16, newdict);
+		return kth_entropy_fastswitch(is, num_k, maxlength, newdict, length, buffer);
+	    }
+	}
+	
+
+	map_type<key_type, tdc::uint_t<24>> dict24((num_k+1)*8);
+	if(sizeof(typename T::value_type) < 3) {
+	    if(kVerbose) {
+		std::cout << "Copy to dictionary with 24-bit values..."  << std::endl; 
+	    }
+	    if(sizeof(typename T::value_type) == 2) { 
+		move_dict(dict, dict24);
+	    } else {
+		move_dict(dict16, dict24);
+	    }
+	    read_dict(is, num_k, maxlength, dict24, length, buffer);
+	    if(length == maxlength  || is.eof()) { return compute_entropy(dict24, num_k, length); }
+	    if(next_keywidth_available(num_k, dict)) {
+		if(kVerbose) {
+		    std::cout << "Copy to dictionary with " << (sizeof(typename nextkeywidth<key_type>::key_type)*8) << " bit keys..."  << std::endl; 
+		}
+		map_type<typename nextkeywidth<key_type>::key_type, typename decltype(dict24)::value_type> newdict((num_k+1)*8);
+		move_dict(dict24, newdict);
+		return kth_entropy_fastswitch(is, num_k, maxlength, newdict, length, buffer);
+	    }
+	}
+
+	map_type<key_type, uint32_t> dict32((num_k+1)*8);
+	if(sizeof(typename T::value_type) < 4) {
+	    if(kVerbose) {
+		std::cout << "Copy to dictionary with 32-bit uvalues..."  << std::endl; 
+	    }
+	    if(sizeof(typename T::value_type) == 3) { 
+		move_dict(dict, dict32);
+	    } else {
+		move_dict(dict24, dict32);
+	    }
+	    read_dict(is, num_k, maxlength, dict32, length, buffer);
+	    if(length == maxlength  || is.eof()) { return compute_entropy(dict32, num_k, length); }
+	    if(next_keywidth_available(num_k, dict)) {
+		if(kVerbose) {
+		    std::cout << "Copy to dictionary with " << (sizeof(typename nextkeywidth<key_type>::key_type)*8) << " bit keys..."  << std::endl; 
+		}
+		map_type<typename nextkeywidth<key_type>::key_type, typename decltype(dict32)::value_type> newdict((num_k+1)*8);
+		move_dict(dict32, newdict);
+		return kth_entropy_fastswitch(is, num_k, maxlength, newdict, length, buffer);
+	    }
+	}
+
+	map_type<key_type, tdc::uint_t<40>> dict40((num_k+1)*8);
+	if(kVerbose) {
+	    std::cout << "Copy to dictionary with 40-bit values..."  << std::endl; 
+	}
+	if(sizeof(typename T::value_type) == 4) { 
+	    move_dict(dict, dict40);
+	} else {
+	    move_dict(dict32, dict40);
+	}
+	read_dict(is, num_k, maxlength, dict40, length, buffer);
+	if(next_keywidth_available(num_k, dict)) {
+		if(kVerbose) {
+		    std::cout << "Copy to dictionary with " << (sizeof(typename nextkeywidth<key_type>::key_type)*8) << " bit keys..."  << std::endl; 
+		}
+	    map_type<typename nextkeywidth<key_type>::key_type, typename decltype(dict40)::value_type> newdict((num_k+1)*8);
+	    move_dict(dict40, newdict);
+	    return kth_entropy_fastswitch(is, num_k, maxlength, newdict, length, buffer);
+	}
+
+
+	DCHECK(length == maxlength  || is.eof());
+	return compute_entropy(dict40, num_k, length);
+}
+
+double kth_entropy_fastswitch(std::istream& is, const size_t num_k, const size_t maxlength) {
+	using namespace separate_chaining;
+
+	if(num_k == 0) return zeroth_entropy(is, maxlength);
+	size_t length = 0;
+	size_t buffer = 0;
+
+	separate_chaining_map<avx2_key_bucket<uint64_t>, plain_key_bucket<uint8_t>, xorshift_hash, incremental_resize> dict8((num_k+1)*8);
+
+	while(!is.eof()) {
+		const uint8_t read_char = is.get();
+		if(is.eof()) return 0;
+		++length;
+		buffer <<= 8;
+		buffer |= read_char;
+		if(length == num_k) {
+		    break;
+		}
+		if(length == maxlength) { return 0; }
+	}
+	return kth_entropy_fastswitch(is, num_k, maxlength, dict8, length, buffer);
+
+}
+
+double kth_entropy_compact(std::istream& is, const size_t num_k, const size_t maxlength) {
+	using namespace separate_chaining;
+
+	if(num_k == 0) return zeroth_entropy(is, maxlength);
+	size_t length = 0;
+	size_t buffer = 0;
+
+	// separate_chaining_map<varwidth_key_bucket, plain_key_bucket<tdc::uint_t<40>>, xorshift_hash, incremental_resize> dict((num_k+1)*8);
+
+	//separate_chaining_map<avx2_key_bucket<uint64_t>, plain_key_bucket<uint64_t>, xorshift_hash, incremental_resize> dict((num_k+1)*8);
+	separate_chaining_map<avx2_key_bucket<uint64_t>, plain_key_bucket<uint64_t>, hash_mapping_adapter<uint64_t, SplitMix>, incremental_resize> dict(64);
+
+	while(!is.eof()) {
+		const uint8_t read_char = is.get();
+		if(is.eof()) return 0;
+		++length;
+		buffer <<= 8;
+		buffer |= read_char;
+		if(length == num_k) {
+		    break;
+		}
+	}
+
+	read_dict(is, num_k, maxlength, dict, length, buffer);
+	DCHECK(length == maxlength  || is.eof());
+
+	// while(!is.eof()) {
+	// 	const uint8_t read_char = is.get();
+	// 	if(is.eof()) break;
+	// 	++length;
+	// 	display_read_process(length, maxlength);
+	// 	buffer <<= 8;
+	// 	buffer |= read_char;
+	// 	const size_t composedkey = buffer & (-1ULL >> (64- 8*(num_k+1)));
+        //
+	// 	++dict.find_or_insert(composedkey, 0).value_ref();
+	// 	if(length == maxlength) { break; }
+	// }
+	return compute_entropy(dict, num_k, length);
+}
+
 
 
 #include <unistd.h>
@@ -368,6 +609,10 @@ int main(const int argc, char** argv) {
 	double entropy;
 	switch(method) {
 	    case 1:
+		if(kVerbose) { std::cout << "Running kth_entropy_naive..." << std::endl; }
+		entropy = kth_entropy_naive(file, num_k, prefixlength);
+		break;
+	    case 2:
 		if(num_k > 8) {
 		    std::cerr << "Method works only up to k = 8" << std::endl;
 		    return 1;
@@ -375,9 +620,21 @@ int main(const int argc, char** argv) {
 		if(kVerbose) { std::cout << "Running kth_entropy_compact..." << std::endl; }
 		entropy = kth_entropy_compact(file, num_k, prefixlength);
 		break;
-	    case 2:
-		if(kVerbose) { std::cout << "Running kth_entropy_naive..." << std::endl; }
-		entropy = kth_entropy_naive(file, num_k, prefixlength);
+	    case 3:
+		if(num_k > 7) {
+		    std::cerr << "Method works only up to k = 7" << std::endl;
+		    return 1;
+		}
+		if(kVerbose) { std::cout << "Running kth_entropy_switch..." << std::endl; }
+		entropy = kth_entropy_switch(file, num_k, prefixlength);
+		break;
+	    case 4:
+		if(num_k > 7) {
+		    std::cerr << "Method works only up to k = 7" << std::endl;
+		    return 1;
+		}
+		if(kVerbose) { std::cout << "Running kth_entropy_fastswitch..." << std::endl; }
+		entropy = kth_entropy_fastswitch(file, num_k, prefixlength);
 		break;
 	    default:
 		if(num_k > 7) {
